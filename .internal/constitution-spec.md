@@ -4,13 +4,13 @@
 
 #### 1.1 Project description 
 
-entity-processing is a research-oriented Python toolkit for extracting structured information from text documents (messages, news articles). The toolkit provides four core capabilities: (1) entity extraction (NER-like identification of persons, organizations, locations, concepts, etc.), (2) sentiment analysis per entity (determining the author's sentiment toward each extracted entity), (3) relation extraction (identification of relations between entities withint one document) and (4) knowledge graph construction (building a graph of interconnected entities from a corpus of documents). The project follows a hydra-backed repository structure with configurable executable scripts for each processing pipeline.
+entity-processing is a research-oriented Python toolkit for extracting structured information from text documents (messages, news articles). The toolkit provides three core capabilities: (1) entity extraction (NER-like identification of persons, organizations, locations, concepts, etc.), (2) sentiment analysis per entity (determining the author's sentiment toward each extracted entity) and (3) relation extraction (identification of relations between entities within one document). The project follows a hydra-backed repository structure with configurable executable scripts for each processing pipeline.
 
-Capability 4 (knowledge graph construction) cannot be validated at the moment so it won't be included into the requirement analysis. This is subject to revision in future though.
+Knowledge graph construction is out of scope for this spec revision entirely (it was considered and deferred; subject to revision in future).
 
 #### 1.2 Project motivation
 
-The project addresses the need for systematic, research-grade text analysis that goes beyond simple keyword matching or flat NER. By combining entity extraction with sentiment attribution and relational graph building, it enables holistic understanding of large document corpora — supporting research questions about how entities are discussed, connected, and characterized across messages and news sources.
+The project addresses the need for systematic, research-grade text analysis that goes beyond simple keyword matching or flat NER. By combining entity extraction with sentiment attribution and relation extraction, it enables holistic understanding of large document corpora — supporting research questions about how entities are discussed, connected, and characterized across messages and news sources.
 
 #### 1.3 Implementation repos
 
@@ -32,28 +32,28 @@ Autonomous
 
 #### 2.2 Non-functional requirements
 
-**NFR1. Time Performance**: 100 documents should processed within 10 minutes.
+**NFR1. Time Performance**: 100 documents must be processed within 10 minutes.
 
-**NFR2. LLM**: `glm-5.3-flash` is the only allowed LLM for entity processing.
+**NFR2. LLM**: The default LLM is `glm-5.3-flash`. Model overrides via Hydra configuration are allowed (e.g. for research experiments), but validation is performed with `glm-5.3-flash` only.
 
 #### 2.3 Preferences
 
-**P1. Configurability**: All parameters (model, endpoint, prompt templates, entity types, graph output format) must be configurable via Hydra YAML configs — no hardcoded values.
+**P1. Configurability**: All parameters (model, endpoint, prompt templates, entity types) must be configurable via Hydra YAML configs — no hardcoded values.
 
-**P2. Modularity**: If possible, each processing step (e.g., NER, sentiment, facts, graph) should be independently usable and composable.
+**P2. Modularity**: If possible, each processing step (e.g., NER, sentiment, relations) should be independently usable and composable.
 
 **P3. LLM Backend**: All NLP capabilities use the `rally` library for LLM interaction, with the API endpoint and model name configurable via Hydra.
 
 **P4. Type Safety**: All code must use Python type hints, enforced by linters.
 
-**P5. Extensibility**: New entity types, fact schemas, and graph backends should be addable without modifying core code.
+**P5. Extensibility**: New entity types and relation types should be addable without modifying core code.
 
 **P6. Multi-language Support**: All extraction and analysis capabilities should work across multiple languages, not limited to English.
 
 ### 3. Acceptance criteria
 
 Any implementation is validated by the validation subproject.
-The validation service should be invoked via HTTP (locahost, port 8456) where you should send the POST request with the following json payload:
+The validation service should be invoked via HTTP (localhost, port 8456) where you should send the POST request with the following json payload:
 ```
 {
   "repo": "<clonable link to repo>",
@@ -67,13 +67,19 @@ The validation service will clone the repo, go to the specified commit and attem
 - `relation_types=[type1, type2, ...]`
 - `sentiment_types=[type1, type2, ...]`
 
+The script will also receive the following two arguments (Hydra-style `key=value`, same as above):
+- `input=<path to a JSONL file with documents>` — each line is a document: `{"doc_id": "...", "text": "..."}`
+- `output=<path to the JSONL output file>`
+
+The dataset paths point to files prepared by the validation service; the script must not rely on anything else being present in the working directory.
+
 Possible entity types: `LOCATION`, `ORGANIZATION`, `PEOPLE`, `OTHER`
 
 Possible relation types: `WORK_FOR`, `KILL`, `ORGANIZATION_BASED_IN`, `LIVE_IN`, `LOCATED_IN`
 
 Possible sentiment types: `POSITIVE`, `NEUTRAL`, `NEGATIVE`
 
-It will expect that the script will output `entities.jsonl` in the following format:
+It will expect the script to produce a JSONL file (at the path given by `output`) with one record per input document, in the following format:
 ```
 {
   "doc_id":"...",
@@ -127,13 +133,10 @@ flowchart LR
 
     subgraph EntityProcessing["entity-processing scripts"]
         B["scripts/extract_entities.py"]
-        E["scripts/build_graph.py"]
-        F["scripts/pipeline.py (meta-script)"]
     end
 
     subgraph Storage
-        G["entities.jsonl"]
-        J["knowledge_graph.json"]
+        G["extracted.jsonl"]
     end
 
     subgraph Config["config/"]
@@ -146,38 +149,14 @@ flowchart LR
     end
 
     A --> B --> G
-    G --> E --> J
 
-    F -. orchestrates .-> B
-    F -. orchestrates .-> E
-
-    B & E <--> L <--> M
-    B & E & F <--> K
+    B <--> L <--> M
+    B <--> K
 ```
 
-**Note:** `entities.jsonl` includes sentiments, facts and relations associated with entities.
+**Note:** the output JSONL file includes sentiments and relations associated with entities.
 
 #### 5.2 Core components
 
-1. **`scripts/extract_entities.py`** — Executable script for entity extraction, configured via Hydra. Given that we implement NER by calling an LLM, we should extract local (to a document) relations and facts and perform sentiment analysis within the same API call.
-2. **`scripts/build_graph.py`** — Executable script for knowledge graph construction, configured via Hydra.
-3. **`scripts/pipeline.py`** — Meta-script that chains extract_entities → build_graph, passing JSON Lines between stages.
-4. **`config/`** — Hydra configuration files defining prompts, LLM settings (`rally` backend config), entity types, graph output format, and pipeline stage selection.
-
-### 6. Roadmap
-
-The implementation is organized as a sequence of specs — KISS specs for straightforward setup and orchestration, and general specs for complex components requiring requirements analysis and design.
-
-| ID | Name | Status | Expected result | Duration | Strong scaling efficiency |
-|----|------|--------|-----------------|----------|---------------------------|
-| M1 | Hydra scaffold | Done | Initialize the hydra-backed repository structure: `pyproject.toml`, `requirements.txt`, `requirements_dev.txt`, `run_linters.sh`, `config/` with Hydra base configs, `entity_processing/` package structure, `tests/`, and `README.md`. Establish the `rally` library as a dependency. Create initial `config/user_settings/` for LLM credentials. | 1 | 0.5 |
-| M2 | Entity extraction | Doing | Implement entity extraction: `scripts/extract_entities.py`, LLM prompt design for multi-language entity identification and classification, facts and relations extraction, sentiment analysis, JSON Lines output format, and Hydra configuration for prompts and LLM settings. Validate on a subset of the curated dataset (English + Russian). | 4 | 0.5 |
-| M3 | Knowledge graph | To do | Implement knowledge graph construction: `scripts/build_graph.py`, aggregation of entities/sentiments/facts from multiple documents, entity resolution (deduplication), graph building with pluggable backends (JSON default), and Hydra configuration. Validate on the full curated dataset. | 2 | 0.5 |
-| M4 | Pipeline orchestration | To do | Implement the meta-script: `scripts/pipeline.py` that chains extract_entities → extract_sentiment → extract_facts → build_graph with JSON Lines intermediate files. Add Hydra config for selecting and ordering pipeline stages. Run end-to-end validation on the curated dataset. | 1 | 0.8 |
-
-```mermaid
-flowchart TD
-  M1 --> M2
-  M2 --> M3
-  M3 --> M4
-```
+1. **`scripts/extract_entities.py`** — Executable script for entity extraction, configured via Hydra. Given that we implement NER by calling an LLM, we should extract local (to a document) relations and perform sentiment analysis within the same API call.
+2. **`config/`** — Hydra configuration files defining prompts, LLM settings (`rally` backend config), and entity types.
