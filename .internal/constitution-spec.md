@@ -52,57 +52,142 @@ Autonomous
 
 ### 3. Acceptance criteria
 
-Any implementation is validated by the validation subproject.
-The validation service should be invoked via HTTP (localhost, port 8456) where you should send the POST request with the following json payload:
+Any implementation is validated by the independently managed validation service in the validation subproject. The solution developer only sends an HTTP request to the service endpoint; they do not launch or configure the validation service.
+
+#### 3.1 Validation endpoint
+
+Send an HTTP `POST` request with `Content-Type: application/json` to:
+
+```text
+http://localhost:8456/validate
 ```
+
+The validation service's suite, datasets, working directory, and runtime settings are managed by the validation subproject and are not request parameters. The request is:
+
+```json
 {
-  "repo": "<clonable link to repo>",
+  "repo": "<clonable link to entity-processing repository>",
   "commit": "<commit hash>",
   "solution_overrides": "<args separated by whitespaces>"
 }
 ```
 
-The validation service will clone the repo, go to the specified commit and attempt to run `scripts/extract_entities.py` with the args provided in `solution_overrides` and three additional arguments:
-- `entity_types=[type1, type2, ...]`
-- `relation_types=[type1, type2, ...]`
-- `sentiment_types=[type1, type2, ...]`
+`repo` and `commit` are required strings. `solution_overrides` is optional and defaults to the empty string. For example:
 
-The script will also receive the following two arguments (Hydra-style `key=value`, same as above):
-- `input=<path to a JSONL file with documents>` — each line is a document: `{"doc_id": "...", "text": "..."}`
-- `output=<path to the JSONL output file>`
-
-The dataset paths point to files prepared by the validation service; the script must not rely on anything else being present in the working directory.
-
-Possible entity types: `LOCATION`, `ORGANIZATION`, `PEOPLE`, `OTHER`
-
-Possible relation types: `WORK_FOR`, `KILL`, `ORGANIZATION_BASED_IN`, `LIVE_IN`, `LOCATED_IN`
-
-Possible sentiment types: `POSITIVE`, `NEUTRAL`, `NEGATIVE`
-
-It will expect the script to produce a JSONL file (at the path given by `output`) with one record per input document, in the following format:
+```bash
+curl -X POST http://localhost:8456/validate \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "repo": "<clonable link to entity-processing repository>",
+    "commit": "<commit hash>",
+    "solution_overrides": ""
+  }'
 ```
+
+For a valid request, the validation service clones the specified repository, checks out the specified commit, prepares its configured validation datasets, and runs `scripts/extract_entities.py` once per configured dataset entry.
+
+#### 3.2 Solution invocation
+
+The validation service invokes `scripts/extract_entities.py` with these Hydra-style arguments:
+
+- `input=<path to a JSONL file with documents>`
+- `output=<path to the JSONL output file>`
+- `entity_types=[LOCATION, ORGANIZATION, PEOPLE, OTHER]`
+- `relation_types=[WORK_FOR, KILL, ORGANIZATION_BASED_IN, LIVE_IN, LOCATED_IN]`
+- `sentiment_types=[POSITIVE, NEUTRAL, NEGATIVE]`
+
+Arguments in `solution_overrides`, when present, are appended to these arguments.
+
+The solution must not depend on files in the validation service's working directory other than the files provided through the invocation arguments.
+
+The `input` file is JSONL. Each line is one document:
+
+```json
+{"doc_id": "<document identifier>", "text": "<document text>"}
+```
+
+The solution must write one JSON object per input document to the path specified by `output`. Each output `doc_id` must identify the corresponding input document.
+
+#### 3.3 Solution output contract
+
+Each output JSONL record has this structure:
+
+```json
 {
-  "doc_id":"...",
+  "doc_id": "<document identifier>",
   "entities": [
     {
-      "entity_id":"e1",
-      "mention":"...",
-      "type":"<entity type>",
-      "sentiment":"<sentiment>"
-    },
-    ...
+      "entity_id": "e1",
+      "mention": "<entity mention>",
+      "type": "<entity type>",
+      "sentiment": "<sentiment>"
+    }
   ],
   "relations": [
     {
-      "relation_type":"<relation type>",
-      "head":"e4",
-      "tail":"e2"
-    },
-    ...
+      "relation_type": "<relation type>",
+      "head": "e1",
+      "tail": "e2"
+    }
   ]
 }
-...
 ```
+
+The allowed entity types are `LOCATION`, `ORGANIZATION`, `PEOPLE`, and `OTHER`. The allowed relation types are `WORK_FOR`, `KILL`, `ORGANIZATION_BASED_IN`, `LIVE_IN`, and `LOCATED_IN`. The allowed sentiment types are `POSITIVE`, `NEUTRAL`, and `NEGATIVE`.
+
+`entity_id` values must be unique within a document. Every relation's `head` and `tail` must refer to an `entity_id` in that same document's `entities` list. Malformed or unparseable output makes the affected metrics impossible to compute.
+
+#### 3.4 Validation response
+
+A successful validation request returns HTTP 200 with one top-level object per acceptance criterion:
+
+```json
+{
+  "AC1": {
+    "status": "accepted",
+    "metrics_status": {
+      "VM1": {
+        "computation_status": "computed",
+        "acceptance_status": "accepted",
+        "computed_value": 0.85,
+        "expected_value_or_threshold": 0.8,
+        "error_message": null
+      }
+    }
+  }
+}
+```
+
+The response contains all acceptance criteria and all metrics belonging to them. `computation_status` is `computed` or `failed_to_compute`; `acceptance_status` is `accepted`, `rejected`, or `null`; `computed_value` is the measured value or `null` when computation failed; `expected_value_or_threshold` is the condition used for that metric; and `error_message` is `null` on successful computation or describes the failure otherwise.
+
+An acceptance criterion has status:
+
+- `accepted` when all of its metrics were computed and satisfy their conditions;
+- `valid` when all of its metrics were computed but at least one condition is not satisfied;
+- `invalid` when at least one metric could not be computed.
+
+Malformed requests, missing required fields, or fields with invalid types return an HTTP 4xx response and do not run validation. An unexpected validation-service failure returns an HTTP 5xx response.
+
+#### 3.5 Metrics and acceptance criteria
+
+The validation service computes:
+
+- **VM1. Entity precision:** fraction of produced `(mention, type)` pairs matching gold entities by exact mention match and type equality.
+- **VM2. Entity recall:** fraction of gold entities matched by produced `(mention, type)` pairs.
+- **VM3. Sentiment precision:** fraction of produced sentiment labels matching the gold sentiment of the corresponding entity.
+- **VM4. Sentiment recall:** fraction of gold sentiment labels matched by produced sentiment labels.
+- **VM5. Relation precision:** fraction of produced relations matching gold relations by relation type and endpoint mentions.
+- **VM6. Relation recall:** fraction of gold relations matched by produced relations.
+- **VM7. Time per 100 documents:** the maximum solution-run time normalized to 100 documents across the configured validation runs.
+- **VM8. LLM model check:** true only when the effective solution configuration resolves to `glm-5.3-flash`.
+
+The acceptance criteria are:
+
+- **AC1. Accurate entity extraction:** VM1 > 0.8 and VM2 > 0.8;
+- **AC2. Accurate sentiment analysis:** VM3 > 0.8 and VM4 > 0.8;
+- **AC3. Accurate relation extraction:** VM5 > 0.6 and VM6 > 0.6;
+- **AC4. Satisfactory time performance:** VM7 < 10 minutes;
+- **AC5. Correct LLM model:** VM8 = `true`.
 
 ### 4. Insight
 
