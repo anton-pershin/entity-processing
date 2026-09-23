@@ -1,0 +1,11 @@
+defaults:
+  - _self_
+  - llm: default
+
+input: null
+output: null
+entity_types: [LOCATION, ORGANIZATION, PEOPLE, OTHER]
+relation_types: [WORK_FOR, KILL, ORGANIZATION_BASED_IN, LIVE_IN, LOCATED_IN]
+sentiment_types: [POSITIVE, NEUTRAL, NEGATIVE]
+system_prompt: "You extract structured entities, targeted sentiment, and local relations from documents."
+max_output_tokens: 2048

@@ -1,0 +1,6 @@
+_target_: rally.llm.OpenAiApiLlmWithAuthorization
+url: ${oc.env:LLM_URL,https://caila.io/api/openai/v1/chat/completions}
+api_key: ${oc.env:CAILA_API_KEY,null}
+model: glm-5.3-flash
+max_concurrent_requests: 1
+enable_thinking: false
