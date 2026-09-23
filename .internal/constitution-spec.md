@@ -189,6 +189,41 @@ The acceptance criteria are:
 - **AC4. Satisfactory time performance:** VM7 < 10 minutes;
 - **AC5. Correct LLM model:** VM8 = `true`.
 
+#### 3.6 Illustrative validation-dataset samples
+
+The following examples are representative shapes and content of the validation datasets; they are newly written illustrations, not copied dataset records. The entity-relation dataset contains a document together with typed entity mentions and relations between them:
+
+```json
+{
+  "doc_id": "example-01",
+  "text": "Dr. Elena Marquez joined Northstar Labs in Madrid and now lives there.",
+  "entities": [
+    {"mention": "Elena Marquez", "type": "PEOPLE"},
+    {"mention": "Northstar Labs", "type": "ORGANIZATION"},
+    {"mention": "Madrid", "type": "LOCATION"}
+  ],
+  "relations": [
+    {"relation_type": "WORK_FOR", "head": "Elena Marquez", "tail": "Northstar Labs"},
+    {"relation_type": "LIVE_IN", "head": "Elena Marquez", "tail": "Madrid"}
+  ]
+}
+```
+
+The sentiment dataset contains a document and entity-level sentiment labels, where the label describes the author's sentiment toward the entity in that document:
+
+```json
+{
+  "doc_id": "example-02",
+  "text": "Мэр похвалил компанию «Волна Энерджи» за быстрое восстановление электроснабжения, хотя жители критиковали её за прежние задержки.",
+  "entities": [
+    {"mention": "Волна Энерджи", "type": "ORGANIZATION", "sentiment": "POSITIVE"},
+    {"mention": "жители", "type": "OTHER", "sentiment": "NEUTRAL"}
+  ]
+}
+```
+
+These examples describe gold-data concepts used to compute the metrics; the solution receives only the document fields specified in §3.2 and must produce the output structure specified in §3.3.
+
 ### 4. Insight
 
 **Idea 1: Traditional NLP pipeline (spaCy, transformers, rule-based).** Use dedicated models for each task: spaCy or a fine-tuned BERT for NER, sentiment classifiers for sentiment analysis, rule-based or pattern-matching extractors for facts, and a separate graph construction module. This approach offers full control over each component and can be highly optimized for speed and cost.
