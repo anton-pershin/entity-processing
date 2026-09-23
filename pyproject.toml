@@ -18,5 +18,8 @@ include = ["entity_processing*"]
 [project.optional-dependencies]
 test = ["pytest>=8"]
 
+[tool.black]
+target-version = ["py312"]
+
 [tool.pytest.ini_options]
 pythonpath = ["."]

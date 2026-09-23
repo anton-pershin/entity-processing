@@ -57,7 +57,9 @@ def normalize_result(
     raw_relations = raw.get("relations", [])
     if not isinstance(raw_entities, Sequence) or isinstance(raw_entities, (str, bytes)):
         raise ValueError("entities must be a list")
-    if not isinstance(raw_relations, Sequence) or isinstance(raw_relations, (str, bytes)):
+    if not isinstance(raw_relations, Sequence) or isinstance(
+        raw_relations, (str, bytes)
+    ):
         raise ValueError("relations must be a list")
 
     for candidate in raw_entities:

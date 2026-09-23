@@ -8,10 +8,9 @@ from pathlib import Path
 from typing import Any
 
 import hydra
-from hydra.utils import get_original_cwd, instantiate
-from omegaconf import DictConfig, OmegaConf
+from hydra.utils import instantiate
+from omegaconf import DictConfig
 from rally.interaction import request_based_on_message_history
-from rally.utils.common import get_config_path
 
 from entity_processing import ExtractionConfig, extract_document
 
@@ -33,7 +32,9 @@ def _request_factory(llm: Any):
             max_output_tokens=llm.max_output_tokens,
             enable_thinking=llm.enable_thinking,
         )
-        if not isinstance(response, dict) or not isinstance(response.get("content"), str):
+        if not isinstance(response, dict) or not isinstance(
+            response.get("content"), str
+        ):
             raise ValueError("rally returned a response without text content")
         return response["content"]
 
@@ -61,23 +62,30 @@ def run(cfg: DictConfig) -> None:
     llm = instantiate(cfg.llm)
     request = _request_factory(llm)
 
-    with input_path.open(encoding="utf-8") as input_file, output_path.open(
-        "w", encoding="utf-8"
-    ) as output_file:
+    with (
+        input_path.open(encoding="utf-8") as input_file,
+        output_path.open("w", encoding="utf-8") as output_file,
+    ):
         for line_number, line in enumerate(input_file, start=1):
             document = json.loads(line)
             doc_id = document.get("doc_id")
             try:
-                result = extract_document(str(document["text"]), extraction_config, request)
+                result = extract_document(
+                    str(document["text"]), extraction_config, request
+                )
             except Exception:
-                logger.exception("Failed to process document %r on line %d", doc_id, line_number)
+                logger.exception(
+                    "Failed to process document %r on line %d", doc_id, line_number
+                )
                 result = {"entities": [], "relations": []}
-            output_file.write(json.dumps({"doc_id": doc_id, **result}, ensure_ascii=False) + "\n")
+            output_file.write(
+                json.dumps({"doc_id": doc_id, **result}, ensure_ascii=False) + "\n"
+            )
 
 
 if __name__ == "__main__":
     hydra.main(
-        config_path=str(Path(get_original_cwd()) / "config"),
+        config_path="../config",
         config_name=CONFIG_NAME,
         version_base="1.3",
     )(run)()

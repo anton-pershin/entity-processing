@@ -7,7 +7,6 @@ from entity_processing.processor import (
     normalize_result,
 )
 
-
 CONFIG = ExtractionConfig(
     entity_types=("PEOPLE", "ORGANIZATION"),
     relation_types=("WORK_FOR",),
@@ -32,10 +31,22 @@ def test_extract_document_makes_one_request_and_returns_structured_result() -> N
         return json.dumps(
             {
                 "entities": [
-                    {"entity_id": "e1", "mention": "Elena", "type": "PEOPLE", "sentiment": "NEUTRAL"},
-                    {"entity_id": "e2", "mention": "Northstar Labs", "type": "ORGANIZATION", "sentiment": "POSITIVE"},
+                    {
+                        "entity_id": "e1",
+                        "mention": "Elena",
+                        "type": "PEOPLE",
+                        "sentiment": "NEUTRAL",
+                    },
+                    {
+                        "entity_id": "e2",
+                        "mention": "Northstar Labs",
+                        "type": "ORGANIZATION",
+                        "sentiment": "POSITIVE",
+                    },
                 ],
-                "relations": [{"relation_type": "WORK_FOR", "head": "e1", "tail": "e2"}],
+                "relations": [
+                    {"relation_type": "WORK_FOR", "head": "e1", "tail": "e2"}
+                ],
             }
         )
 
@@ -43,17 +54,39 @@ def test_extract_document_makes_one_request_and_returns_structured_result() -> N
 
     assert len(calls) == 1
     assert result["entities"][0]["mention"] == "Elena"
-    assert result["relations"] == [{"relation_type": "WORK_FOR", "head": "e1", "tail": "e2"}]
+    assert result["relations"] == [
+        {"relation_type": "WORK_FOR", "head": "e1", "tail": "e2"}
+    ]
 
 
 def test_normalize_result_discards_invalid_values_and_keeps_first_duplicate() -> None:
     result = normalize_result(
         {
             "entities": [
-                {"entity_id": "e1", "mention": "bad", "type": "UNKNOWN", "sentiment": "NEUTRAL"},
-                {"entity_id": "e1", "mention": "Elena", "type": "PEOPLE", "sentiment": "NEUTRAL"},
-                {"entity_id": "e1", "mention": "Other Elena", "type": "PEOPLE", "sentiment": "POSITIVE"},
-                {"entity_id": "e2", "mention": "Labs", "type": "ORGANIZATION", "sentiment": "POSITIVE"},
+                {
+                    "entity_id": "e1",
+                    "mention": "bad",
+                    "type": "UNKNOWN",
+                    "sentiment": "NEUTRAL",
+                },
+                {
+                    "entity_id": "e1",
+                    "mention": "Elena",
+                    "type": "PEOPLE",
+                    "sentiment": "NEUTRAL",
+                },
+                {
+                    "entity_id": "e1",
+                    "mention": "Other Elena",
+                    "type": "PEOPLE",
+                    "sentiment": "POSITIVE",
+                },
+                {
+                    "entity_id": "e2",
+                    "mention": "Labs",
+                    "type": "ORGANIZATION",
+                    "sentiment": "POSITIVE",
+                },
             ],
             "relations": [
                 {"relation_type": "WORK_FOR", "head": "e1", "tail": "e2"},
