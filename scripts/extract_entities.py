@@ -10,7 +10,6 @@ from typing import Any
 import hydra
 from hydra.utils import instantiate
 from omegaconf import DictConfig
-from rally.interaction import request_based_on_message_history
 
 from entity_processing import ExtractionConfig, extract_document
 
@@ -19,6 +18,8 @@ CONFIG_NAME = "config_extract_entities"
 
 
 def _request_factory(llm: Any):
+    from rally.interaction import request_based_on_message_history
+
     def request(system_prompt: str, user_prompt: str) -> str:
         messages = [
             {"role": "system", "content": system_prompt},
