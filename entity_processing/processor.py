@@ -106,6 +106,21 @@ def normalize_result(
     return {"entities": entities, "relations": relations}
 
 
+def _parse_json_object(response_text: str) -> Any:
+    """Extract the first valid JSON object from model response text."""
+    decoder = json.JSONDecoder()
+    for start, character in enumerate(response_text):
+        if character != "{":
+            continue
+        try:
+            value, _ = decoder.raw_decode(response_text[start:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, Mapping):
+            return value
+    raise ValueError("LLM response contains no valid JSON object")
+
+
 def extract_document(
     text: str,
     config: ExtractionConfig,
@@ -113,5 +128,5 @@ def extract_document(
 ) -> dict[str, list[dict[str, str]]]:
     """Extract and normalize one document using exactly one LLM request."""
     response_text = request(config.system_prompt, build_user_prompt(text, config))
-    raw = json.loads(response_text)
+    raw = _parse_json_object(response_text)
     return normalize_result(raw, config)
