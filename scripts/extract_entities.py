@@ -11,8 +11,6 @@ import hydra
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 
-from entity_processing import ExtractionConfig, extract_document
-
 logger = logging.getLogger(__name__)
 CONFIG_NAME = "config_extract_entities"
 
@@ -48,6 +46,8 @@ def _config_tuple(value: Any) -> tuple[str, ...]:
 
 def run(cfg: DictConfig) -> None:
     """Process all configured input documents in order."""
+    from entity_processing import ExtractionConfig, extract_document
+
     if cfg.input is None or cfg.output is None:
         raise ValueError("Both input and output must be supplied")
 
