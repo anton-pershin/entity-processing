@@ -149,6 +149,31 @@ def test_hydra_validation_overrides_and_model_boundary(
     assert "MIXED" in prompt
 
 
+def test_malformed_input_lines_are_skipped_and_later_documents_continue(
+    monkeypatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    input_path = tmp_path / "input.jsonl"
+    output_path = tmp_path / "output.jsonl"
+    input_path.write_text(
+        json.dumps({"doc_id": "first", "text": "first"})
+        + "\nnot-json\n\n"
+        + json.dumps({"doc_id": "last", "text": "last"})
+        + "\n",
+        encoding="utf-8",
+    )
+
+    _run_with_stub(
+        monkeypatch,
+        responses=[_empty_response(), _empty_response()],
+        cfg=_config(input_path, output_path),
+    )
+
+    output = _read_output(output_path)
+    assert [record["doc_id"] for record in output] == ["first", "last"]
+    assert "input line 2" in caplog.text
+    assert "input line 3" in caplog.text
+
+
 def test_exact_validation_overrides_compose_and_run(
     monkeypatch, tmp_path: Path
 ) -> None:

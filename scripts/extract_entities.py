@@ -68,12 +68,21 @@ def run(cfg: DictConfig) -> None:
         output_path.open("w", encoding="utf-8") as output_file,
     ):
         for line_number, line in enumerate(input_file, start=1):
-            document = json.loads(line)
-            doc_id = document.get("doc_id")
+            if not line.strip():
+                logger.error("Skipping blank input line %d", line_number)
+                continue
             try:
-                result = extract_document(
-                    str(document["text"]), extraction_config, request
-                )
+                document = json.loads(line)
+                if not isinstance(document, dict):
+                    raise ValueError("input record must be a JSON object")
+                doc_id = document["doc_id"]
+                text = document["text"]
+            except Exception:
+                logger.exception("Failed to parse input line %d", line_number)
+                continue
+
+            try:
+                result = extract_document(str(text), extraction_config, request)
             except Exception:
                 logger.exception(
                     "Failed to process document %r on line %d", doc_id, line_number
