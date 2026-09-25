@@ -88,6 +88,7 @@ def test_script_smoke_preserves_order_ids_and_contract(
     assert [record["doc_id"] for record in output] == ["first", "second"]
     assert all(set(record) == {"doc_id", "entities", "relations"} for record in output)
     assert [call["model"] for call in calls] == ["test-model", "test-model"]
+    assert [call["max_output_tokens"] for call in calls] == [2048, 2048]
     assert "Первый документ" in calls[0]["message_history"][1]["content"]
     assert "PEOPLE" in calls[0]["message_history"][1]["content"]
 
