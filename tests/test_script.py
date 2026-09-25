@@ -44,7 +44,9 @@ def _config(input_path: Path, output_path: Path, **overrides):
         "relation_types": ["WORK_FOR"],
         "sentiment_types": ["POSITIVE", "NEUTRAL"],
         "system_prompt": "Test system prompt",
-        "llm": {"retries": 0, "backoff_seconds": 0},
+        "retries": 0,
+        "backoff_seconds": 0,
+        "llm": {},
     }
     values.update(overrides)
     return OmegaConf.create(values)
@@ -316,3 +318,5 @@ def test_exact_validation_overrides_compose_and_run(
 
     _run_with_stub(monkeypatch, responses=[_empty_response()], cfg=cfg)
     assert _read_output(output_path)[0]["doc_id"] == "one"
+    assert cfg.retries == 3
+    assert cfg.backoff_seconds == 1.0

@@ -90,8 +90,8 @@ def run(cfg: DictConfig) -> None:
     llm = instantiate(cfg.llm)
     request = _request_factory(
         llm,
-        retries=int(getattr(cfg.llm, "retries", 3)),
-        backoff_seconds=float(getattr(cfg.llm, "backoff_seconds", 1.0)),
+        retries=int(getattr(cfg, "retries", 3)),
+        backoff_seconds=float(getattr(cfg, "backoff_seconds", 1.0)),
     )
 
     with (

@@ -4,6 +4,4 @@ api_key: ${oc.env:CAILA_API_KEY,null}
 model: glm-5.3-flash
 max_concurrent_requests: 1
 max_output_tokens: 2048
-retries: 3
-backoff_seconds: 1.0
 enable_thinking: false
