@@ -38,7 +38,7 @@ Manual
 
 #### 2.3 Preferences
 
-**P1. Configurability**: All parameters (model, endpoint, prompt templates, entity types) must be configurable via Hydra YAML configs — no hardcoded values.
+**P1. Configurability**: All parameters (model, endpoint, prompt templates, entity labels, relation labels, and sentiment labels) must be configurable via Hydra YAML configs — no hardcoded values.
 
 **P2. Modularity**: If possible, each processing step (e.g., NER, sentiment, relations) should be independently usable and composable.
 
@@ -88,13 +88,21 @@ For a valid request, the validation service clones the specified repository, che
 
 #### 3.2 Solution invocation
 
-The validation service invokes `scripts/extract_entities.py` with these Hydra-style arguments:
+The validation service invokes `scripts/extract_entities.py` once per configured dataset entry with these Hydra-style arguments:
 
 - `input=<path to a JSONL file with documents>`
 - `output=<path to the JSONL output file>`
-- `entity_types=[LOCATION, ORGANIZATION, PEOPLE, OTHER]`
-- `relation_types=[WORK_FOR, KILL, ORGANIZATION_BASED_IN, LIVE_IN, LOCATED_IN]`
-- `sentiment_types=[POSITIVE, NEUTRAL, NEGATIVE]`
+- `entity_types=<available master entity labels for this dataset entry>`
+- `relation_types=<available master relation labels for this dataset entry>`
+- `sentiment_types=<available master sentiment labels for this dataset entry>`
+
+The master label lists are:
+
+- Entity labels: `PEOPLE`, `ORGANIZATION`, `LOCATION`
+- Relation labels: `WORK_FOR`, `KILL`, `ORGANIZATION_BASED_IN`, `LIVE_IN`, `LOCATED_IN`
+- Sentiment labels: `POSITIVE`, `NEUTRAL`, `NEGATIVE`
+
+Each dataset entry maps each original dataset label to one master label or to `null`. A non-null mapping value makes that master label available for the entry; labels mapped to `null` are unavailable and are omitted from the corresponding invocation list. The solution receives only available master labels, never original dataset labels. `OTHER` is not a master entity label.
 
 Arguments in `solution_overrides`, when present, are appended to these arguments.
 
@@ -133,7 +141,7 @@ Each output JSONL record has this structure:
 }
 ```
 
-The allowed entity types are `LOCATION`, `ORGANIZATION`, `PEOPLE`, and `OTHER`. The allowed relation types are `WORK_FOR`, `KILL`, `ORGANIZATION_BASED_IN`, `LIVE_IN`, and `LOCATED_IN`. The allowed sentiment types are `POSITIVE`, `NEUTRAL`, and `NEGATIVE`.
+The output uses the master vocabularies supplied for the current dataset entry. An entity's `type`, a relation's `relation_type`, and an entity's `sentiment`, when present, must be one of the corresponding labels passed in that invocation.
 
 `entity_id` values must be unique within a document. Every relation's `head` and `tail` must refer to an `entity_id` in that same document's `entities` list. Malformed or unparseable output makes the affected metrics impossible to compute.
 
@@ -170,24 +178,23 @@ Malformed requests, missing required fields, or fields with invalid types return
 
 #### 3.5 Metrics and acceptance criteria
 
-The validation service computes:
+The validation service computes the following metrics for the capabilities enabled by the configured dataset entries:
 
-- **VM1. Entity precision:** fraction of produced `(mention, type)` pairs matching gold entities by exact mention match and type equality.
+- **VM1. Entity precision:** fraction of produced `(mention, type)` pairs matching gold entities by exact mention match and master-label equality.
 - **VM2. Entity recall:** fraction of gold entities matched by produced `(mention, type)` pairs.
-- **VM3. Sentiment precision:** fraction of produced sentiment labels matching the gold sentiment of the corresponding entity.
-- **VM4. Sentiment recall:** fraction of gold sentiment labels matched by produced sentiment labels.
-- **VM5. Relation precision:** fraction of produced relations matching gold relations by relation type and endpoint mentions.
-- **VM6. Relation recall:** fraction of gold relations matched by produced relations.
-- **VM7. Time per 100 documents:** the maximum solution-run time normalized to 100 documents across the configured validation runs.
-- **VM8. LLM model check:** true only when the effective solution configuration resolves to `glm-5.3-flash`.
+- **VM3. Sentiment precision:** fraction of produced sentiment-bearing entities whose document id, mention, and sentiment match a gold sentiment annotation. Entity type is not part of this matching key.
+- **VM4. Relation precision:** fraction of produced relations matching gold relations by relation type and endpoint mentions.
+- **VM5. Relation recall:** fraction of gold relations matched by produced relations.
+- **VM6. Time per 100 documents:** the maximum solution-run time normalized to 100 documents across the configured validation runs.
+- **VM7. LLM model check:** true only when the effective solution configuration resolves to `glm-5.3-flash`.
 
 The acceptance criteria are:
 
 - **AC1. Accurate entity extraction:** VM1 > 0.8 and VM2 > 0.8;
-- **AC2. Accurate sentiment analysis:** VM3 > 0.8 and VM4 > 0.8;
-- **AC3. Accurate relation extraction:** VM5 > 0.6 and VM6 > 0.6;
-- **AC4. Satisfactory time performance:** VM7 < 10 minutes;
-- **AC5. Correct LLM model:** VM8 = `true`.
+- **AC2. Accurate sentiment analysis:** VM3 > 0.8;
+- **AC3. Accurate relation extraction:** VM4 > 0.6 and VM5 > 0.6;
+- **AC4. Satisfactory time performance:** VM6 < 10 minutes;
+- **AC5. Correct LLM model:** VM7 = `true`.
 
 #### 3.6 Illustrative validation-dataset samples
 
@@ -217,7 +224,7 @@ The sentiment dataset contains a document and entity-level sentiment labels, whe
   "text": "Мэр похвалил компанию «Волна Энерджи» за быстрое восстановление электроснабжения, хотя жители критиковали её за прежние задержки.",
   "entities": [
     {"mention": "Волна Энерджи", "type": "ORGANIZATION", "sentiment": "POSITIVE"},
-    {"mention": "жители", "type": "OTHER", "sentiment": "NEUTRAL"}
+    {"mention": "жители", "type": "PEOPLE", "sentiment": "NEUTRAL"}
   ]
 }
 ```
