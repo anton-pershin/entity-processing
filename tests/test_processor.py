@@ -69,9 +69,11 @@ def test_response_format_variants_are_parsed() -> None:
         f"Here is the result:\n{payload}\nDone.",
         f"The document contains {{Elena}}.\n{payload}",
     ):
-        result = extract_document(
-            "text", CONFIG, lambda _system, _user, value=response: value
-        )
+
+        def request(_system: str, _user: str, value: str = response) -> str:
+            return value
+
+        result = extract_document("text", CONFIG, request)
         assert result == {"entities": [], "relations": []}
 
 

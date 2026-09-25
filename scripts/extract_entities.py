@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import hydra
 from hydra.utils import instantiate
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 CONFIG_NAME = "config_extract_entities"
 
 
-def _request_factory(llm: Any):
+def _request_factory(llm: Any) -> Callable[[str, str], str]:
     from rally.interaction import request_based_on_message_history
 
     def request(system_prompt: str, user_prompt: str) -> str:
