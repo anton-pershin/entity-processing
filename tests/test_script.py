@@ -67,6 +67,26 @@ def _empty_response() -> str:
     return json.dumps({"entities": [], "relations": []})
 
 
+def test_rally_invalid_response_is_logged(
+    monkeypatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    invalid_response = {"unexpected": "response", "content": None}
+
+    def request_based_on_message_history(**_kwargs):
+        return invalid_response
+
+    monkeypatch.setattr(
+        "rally.interaction.request_based_on_message_history",
+        request_based_on_message_history,
+    )
+
+    request = extract_script._request_factory(FakeLlm())
+    with pytest.raises(ValueError, match="without text content"):
+        request("system", "user")
+
+    assert repr(invalid_response) in caplog.text
+
+
 def test_script_smoke_preserves_order_ids_and_contract(
     monkeypatch, tmp_path: Path
 ) -> None:

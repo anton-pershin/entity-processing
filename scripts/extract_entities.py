@@ -34,6 +34,7 @@ def _request_factory(llm: Any) -> Callable[[str, str], str]:
         if not isinstance(response, dict) or not isinstance(
             response.get("content"), str
         ):
+            logger.error("rally returned an invalid response: %r", response)
             raise ValueError("rally returned a response without text content")
         return response["content"]
 
