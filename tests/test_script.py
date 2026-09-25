@@ -44,7 +44,7 @@ def _config(input_path: Path, output_path: Path, **overrides):
         "relation_types": ["WORK_FOR"],
         "sentiment_types": ["POSITIVE", "NEUTRAL"],
         "system_prompt": "Test system prompt",
-        "llm": {},
+        "llm": {"retries": 0, "backoff_seconds": 0},
     }
     values.update(overrides)
     return OmegaConf.create(values)
@@ -80,11 +80,61 @@ def test_rally_invalid_response_is_logged(
         request_based_on_message_history,
     )
 
-    request = extract_script._request_factory(FakeLlm())
+    request = extract_script._request_factory(FakeLlm(), retries=0)
     with pytest.raises(ValueError, match="without text content"):
         request("system", "user")
 
     assert repr(invalid_response) in caplog.text
+
+
+def test_request_retries_with_exponential_backoff(monkeypatch) -> None:
+    responses = [
+        ValueError("first"),
+        ValueError("second"),
+        ValueError("third"),
+        {"content": "{}"},
+    ]
+    calls = []
+
+    def request_based_on_message_history(**_kwargs):
+        calls.append(True)
+        response = responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    sleeps = []
+    monkeypatch.setattr(
+        "rally.interaction.request_based_on_message_history",
+        request_based_on_message_history,
+    )
+    monkeypatch.setattr(extract_script.time, "sleep", sleeps.append)
+
+    request = extract_script._request_factory(
+        FakeLlm(), retries=3, backoff_seconds=0.25
+    )
+    assert request("system", "user") == "{}"
+    assert len(calls) == 4
+    assert sleeps == [0.25, 0.5, 1.0]
+
+
+def test_request_retries_are_configurable(monkeypatch) -> None:
+    calls = []
+
+    def request_based_on_message_history(**_kwargs):
+        calls.append(True)
+        raise ValueError("failure")
+
+    monkeypatch.setattr(
+        "rally.interaction.request_based_on_message_history",
+        request_based_on_message_history,
+    )
+    monkeypatch.setattr(extract_script.time, "sleep", lambda _delay: None)
+
+    request = extract_script._request_factory(FakeLlm(), retries=2, backoff_seconds=0)
+    with pytest.raises(ValueError, match="failure"):
+        request("system", "user")
+    assert len(calls) == 3
 
 
 def test_script_smoke_preserves_order_ids_and_contract(

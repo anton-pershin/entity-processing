@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -15,28 +16,53 @@ logger = logging.getLogger(__name__)
 CONFIG_NAME = "config_extract_entities"
 
 
-def _request_factory(llm: Any) -> Callable[[str, str], str]:
+def _request_factory(
+    llm: Any, retries: int = 3, backoff_seconds: float = 1.0
+) -> Callable[[str, str], str]:
     from rally.interaction import request_based_on_message_history
+
+    if retries < 0:
+        raise ValueError("retries must be non-negative")
+    if backoff_seconds < 0:
+        raise ValueError("backoff_seconds must be non-negative")
 
     def request(system_prompt: str, user_prompt: str) -> str:
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
-        response = request_based_on_message_history(
-            llm_server_url=llm.url,
-            message_history=messages,
-            authorization=llm.authorization,
-            model=llm.model,
-            max_output_tokens=llm.max_output_tokens,
-            enable_thinking=llm.enable_thinking,
-        )
-        if not isinstance(response, dict) or not isinstance(
-            response.get("content"), str
-        ):
-            logger.error("rally returned an invalid response: %r", response)
-            raise ValueError("rally returned a response without text content")
-        return response["content"]
+        last_error: Exception | None = None
+        for attempt in range(retries + 1):
+            try:
+                response = request_based_on_message_history(
+                    llm_server_url=llm.url,
+                    message_history=messages,
+                    authorization=llm.authorization,
+                    model=llm.model,
+                    max_output_tokens=llm.max_output_tokens,
+                    enable_thinking=llm.enable_thinking,
+                )
+                if not isinstance(response, dict) or not isinstance(
+                    response.get("content"), str
+                ):
+                    logger.error("rally returned an invalid response: %r", response)
+                    raise ValueError("rally returned a response without text content")
+                return response["content"]
+            except Exception as error:
+                last_error = error
+                if attempt == retries:
+                    break
+                delay = backoff_seconds * (2**attempt)
+                logger.warning(
+                    "LLM request failed (attempt %d/%d); retrying in %.2f seconds: %s",
+                    attempt + 1,
+                    retries,
+                    delay,
+                    error,
+                )
+                time.sleep(delay)
+        assert last_error is not None
+        raise last_error
 
     return request
 
@@ -62,7 +88,11 @@ def run(cfg: DictConfig) -> None:
         system_prompt=str(cfg.system_prompt),
     )
     llm = instantiate(cfg.llm)
-    request = _request_factory(llm)
+    request = _request_factory(
+        llm,
+        retries=int(getattr(cfg.llm, "retries", 3)),
+        backoff_seconds=float(getattr(cfg.llm, "backoff_seconds", 1.0)),
+    )
 
     with (
         input_path.open(encoding="utf-8") as input_file,
