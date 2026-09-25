@@ -174,6 +174,55 @@ def test_malformed_input_lines_are_skipped_and_later_documents_continue(
     assert "input line 3" in caplog.text
 
 
+def test_validation_contract_asserts_ids_and_relation_endpoints(
+    monkeypatch, tmp_path: Path
+) -> None:
+    input_path = tmp_path / "input.jsonl"
+    output_path = tmp_path / "output.jsonl"
+    documents = [
+        {"doc_id": "first", "text": "First document"},
+        {"doc_id": "second", "text": "Second document"},
+    ]
+    _write_input(input_path, documents)
+    response = json.dumps(
+        {
+            "entities": [
+                {
+                    "entity_id": "e1",
+                    "mention": "Alice",
+                    "type": "PEOPLE",
+                    "sentiment": "NEUTRAL",
+                },
+                {
+                    "entity_id": "e2",
+                    "mention": "Acme",
+                    "type": "ORGANIZATION",
+                    "sentiment": "POSITIVE",
+                },
+            ],
+            "relations": [{"relation_type": "WORK_FOR", "head": "e1", "tail": "e2"}],
+        }
+    )
+
+    _run_with_stub(
+        monkeypatch,
+        responses=[response, response],
+        cfg=_config(input_path, output_path),
+    )
+
+    output = _read_output(output_path)
+    assert {record["doc_id"] for record in output} == {
+        document["doc_id"] for document in documents
+    }
+    for record in output:
+        entity_ids = [entity["entity_id"] for entity in record["entities"]]
+        assert len(entity_ids) == len(set(entity_ids))
+        entity_id_set = set(entity_ids)
+        for relation in record["relations"]:
+            assert relation["head"] in entity_id_set
+            assert relation["tail"] in entity_id_set
+
+
 def test_exact_validation_overrides_compose_and_run(
     monkeypatch, tmp_path: Path
 ) -> None:
