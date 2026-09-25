@@ -67,6 +67,7 @@ def test_response_format_variants_are_parsed() -> None:
         f"```json\n{payload}\n```",
         f"```json\n{payload}\n```\nNotes on extraction.",
         f"Here is the result:\n{payload}\nDone.",
+        f"The document contains {{Elena}}.\n{payload}",
     ):
         result = extract_document(
             "text", CONFIG, lambda _system, _user, value=response: value
@@ -78,7 +79,7 @@ def test_malformed_response_raises() -> None:
     try:
         extract_document("text", CONFIG, lambda _system, _user: "not json")
     except ValueError as error:
-        assert "no valid JSON object" in str(error)
+        assert "no extraction JSON object" in str(error)
     else:
         raise AssertionError("Expected malformed response to raise ValueError")
 

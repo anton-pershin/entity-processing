@@ -107,7 +107,7 @@ def normalize_result(
 
 
 def _parse_json_object(response_text: str) -> Any:
-    """Extract the first valid JSON object from model response text."""
+    """Extract the first extraction-shaped JSON object from model response text."""
     decoder = json.JSONDecoder()
     for start, character in enumerate(response_text):
         if character != "{":
@@ -116,9 +116,9 @@ def _parse_json_object(response_text: str) -> Any:
             value, _ = decoder.raw_decode(response_text[start:])
         except json.JSONDecodeError:
             continue
-        if isinstance(value, Mapping):
+        if isinstance(value, Mapping) and {"entities", "relations"}.issubset(value):
             return value
-    raise ValueError("LLM response contains no valid JSON object")
+    raise ValueError("LLM response contains no extraction JSON object")
 
 
 def extract_document(
