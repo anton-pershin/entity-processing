@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -28,7 +30,8 @@ def _run_with_stub(monkeypatch, responses: list[object], cfg):
         return {"content": response}
 
     monkeypatch.setattr(
-        "rally.interaction.request_based_on_message_history",
+        extract_script,
+        "_request_based_on_message_history",
         request_based_on_message_history,
     )
     monkeypatch.setattr(extract_script, "instantiate", lambda _config: FakeLlm())
@@ -44,6 +47,19 @@ def _config(input_path: Path, output_path: Path, **overrides):
         "relation_types": ["WORK_FOR"],
         "sentiment_types": ["POSITIVE", "NEUTRAL"],
         "system_prompt": "Test system prompt",
+        "user_prompt_template": (
+            "{system_prompt}\\n\\n"
+            "Extract entities, targeted sentiment, and local relations from the document.\\n"
+            "Return only a JSON object with this shape: "
+            '{{"entities": [{{"entity_id": "e1", "mention": "...", '
+            '"type": "...", "sentiment": "..."}}], '
+            '"relations": [{{"relation_type": "...", "head": "e1", '
+            '"tail": "e2"}}]}}\\n'
+            "Allowed entity types: {entity_types}\\n"
+            "Allowed relation types: {relation_types}\\n"
+            "Allowed sentiment types: {sentiment_types}\\n\\n"
+            "Document:\\n{document}"
+        ),
         "retries": 0,
         "backoff_seconds": 0,
         "llm": {},
@@ -69,6 +85,38 @@ def _empty_response() -> str:
     return json.dumps({"entities": [], "relations": []})
 
 
+def test_default_config_uses_current_master_labels() -> None:
+    with initialize_config_dir(
+        config_dir=str(Path(__file__).parents[1] / "config"), version_base="1.3"
+    ):
+        cfg = compose(config_name="config_extract_entities")
+
+    assert list(cfg.entity_types) == ["LOCATION", "ORGANIZATION", "PEOPLE"]
+    assert "OTHER" not in cfg.entity_types
+    assert list(cfg.relation_types) == [
+        "WORK_FOR",
+        "KILL",
+        "ORGANIZATION_BASED_IN",
+        "LIVE_IN",
+        "LOCATED_IN",
+    ]
+    assert list(cfg.sentiment_types) == ["POSITIVE", "NEUTRAL", "NEGATIVE"]
+
+
+def test_configuration_inspection_subprocess() -> None:
+    result = subprocess.run(
+        [sys.executable, "scripts/extract_entities.py", "--cfg", "job"],
+        cwd=Path(__file__).parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "model: glm-5.3-flash" in result.stdout
+    assert "- OTHER" not in result.stdout
+
+
 def test_rally_invalid_response_is_logged(
     monkeypatch, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -78,7 +126,8 @@ def test_rally_invalid_response_is_logged(
         return invalid_response
 
     monkeypatch.setattr(
-        "rally.interaction.request_based_on_message_history",
+        extract_script,
+        "_request_based_on_message_history",
         request_based_on_message_history,
     )
 
@@ -107,7 +156,8 @@ def test_request_retries_with_exponential_backoff(monkeypatch) -> None:
 
     sleeps = []
     monkeypatch.setattr(
-        "rally.interaction.request_based_on_message_history",
+        extract_script,
+        "_request_based_on_message_history",
         request_based_on_message_history,
     )
     monkeypatch.setattr(extract_script.time, "sleep", sleeps.append)
@@ -128,7 +178,8 @@ def test_request_retries_are_configurable(monkeypatch) -> None:
         raise ValueError("failure")
 
     monkeypatch.setattr(
-        "rally.interaction.request_based_on_message_history",
+        extract_script,
+        "_request_based_on_message_history",
         request_based_on_message_history,
     )
     monkeypatch.setattr(extract_script.time, "sleep", lambda _delay: None)
@@ -163,6 +214,59 @@ def test_script_smoke_preserves_order_ids_and_contract(
     assert [call["max_output_tokens"] for call in calls] == [2048, 2048]
     assert "Первый документ" in calls[0]["message_history"][1]["content"]
     assert "PEOPLE" in calls[0]["message_history"][1]["content"]
+
+
+def test_repeated_invocations_use_independent_label_subsets(
+    monkeypatch, tmp_path: Path
+) -> None:
+    first_input = tmp_path / "first.jsonl"
+    first_output = tmp_path / "first-output.jsonl"
+    second_input = tmp_path / "second.jsonl"
+    second_output = tmp_path / "second-output.jsonl"
+    _write_input(first_input, [{"doc_id": "first", "text": "First"}])
+    _write_input(second_input, [{"doc_id": "second", "text": "Second"}])
+
+    response = json.dumps(
+        {
+            "entities": [
+                {
+                    "entity_id": "e1",
+                    "mention": "Alice",
+                    "type": "PEOPLE",
+                    "sentiment": "NEUTRAL",
+                }
+            ],
+            "relations": [],
+        }
+    )
+
+    _run_with_stub(
+        monkeypatch,
+        responses=[response],
+        cfg=_config(
+            first_input,
+            first_output,
+            entity_types=["PEOPLE"],
+            sentiment_types=["NEUTRAL"],
+        ),
+    )
+    _run_with_stub(
+        monkeypatch,
+        responses=[response],
+        cfg=_config(
+            second_input,
+            second_output,
+            entity_types=["ORGANIZATION"],
+            sentiment_types=["POSITIVE"],
+        ),
+    )
+
+    first = _read_output(first_output)
+    second = _read_output(second_output)
+    assert first[0]["entities"][0]["type"] == "PEOPLE"
+    assert second[0]["entities"] == []
+    assert [record["doc_id"] for record in first] == ["first"]
+    assert [record["doc_id"] for record in second] == ["second"]
 
 
 def test_script_failure_isolation_logs_and_continues(
@@ -310,7 +414,7 @@ def test_exact_validation_overrides_compose_and_run(
             overrides=[
                 f"input={input_path}",
                 f"output={output_path}",
-                "entity_types=[LOCATION,ORGANIZATION,PEOPLE,OTHER]",
+                "entity_types=[LOCATION,ORGANIZATION,PEOPLE]",
                 "relation_types=[WORK_FOR,KILL,ORGANIZATION_BASED_IN,LIVE_IN,LOCATED_IN]",
                 "sentiment_types=[POSITIVE,NEUTRAL,NEGATIVE]",
             ],

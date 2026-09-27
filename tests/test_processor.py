@@ -12,15 +12,36 @@ CONFIG = ExtractionConfig(
     relation_types=("WORK_FOR",),
     sentiment_types=("POSITIVE", "NEUTRAL"),
     system_prompt="Configured system prompt",
+    user_prompt_template=(
+        "{system_prompt}\\n\\n"
+        "Extract entities, targeted sentiment, and local relations from the document.\\n"
+        "Return only a JSON object with this shape: "
+        '{{"entities": [{{"entity_id": "e1", "mention": "...", '
+        '"type": "...", "sentiment": "..."}}], '
+        '"relations": [{{"relation_type": "...", "head": "e1", '
+        '"tail": "e2"}}]}}\\n'
+        "Allowed entity types: {entity_types}\\n"
+        "Allowed relation types: {relation_types}\\n"
+        "Allowed sentiment types: {sentiment_types}\\n\\n"
+        "Document:\\n{document}"
+    ),
 )
 
 
-def test_prompt_contains_document_and_configured_labels() -> None:
-    prompt = build_user_prompt("Elena joined Northstar Labs.", CONFIG)
-    assert "Elena joined Northstar Labs." in prompt
-    assert "PEOPLE" in prompt
-    assert "WORK_FOR" in prompt
-    assert "POSITIVE" in prompt
+def test_prompt_template_is_configurable() -> None:
+    config = ExtractionConfig(
+        entity_types=("PEOPLE",),
+        relation_types=("WORK_FOR",),
+        sentiment_types=("NEUTRAL",),
+        system_prompt="ignored system prompt",
+        user_prompt_template=(
+            "CUSTOM {document} | {entity_types} | {relation_types} | {sentiment_types}"
+        ),
+    )
+
+    prompt = build_user_prompt("Alice works.", config)
+
+    assert prompt == ("CUSTOM Alice works. | ['PEOPLE'] | ['WORK_FOR'] | ['NEUTRAL']")
 
 
 def test_extract_document_makes_one_request_and_returns_structured_result() -> None:
@@ -75,6 +96,53 @@ def test_response_format_variants_are_parsed() -> None:
 
         result = extract_document("text", CONFIG, request)
         assert result == {"entities": [], "relations": []}
+
+
+def test_runtime_label_subset_is_isolated() -> None:
+    config = ExtractionConfig(
+        entity_types=("PEOPLE",),
+        relation_types=("WORK_FOR",),
+        sentiment_types=("NEUTRAL",),
+        system_prompt="system",
+        user_prompt_template="{document}",
+    )
+    response = json.dumps(
+        {
+            "entities": [
+                {
+                    "entity_id": "person",
+                    "mention": "Alice",
+                    "type": "PEOPLE",
+                    "sentiment": "NEUTRAL",
+                },
+                {
+                    "entity_id": "place",
+                    "mention": "Paris",
+                    "type": "LOCATION",
+                    "sentiment": "NEUTRAL",
+                },
+                {
+                    "entity_id": "bad-sentiment",
+                    "mention": "Bob",
+                    "type": "PEOPLE",
+                    "sentiment": "POSITIVE",
+                },
+            ],
+            "relations": [
+                {"relation_type": "WORK_FOR", "head": "person", "tail": "place"},
+                {
+                    "relation_type": "WORK_FOR",
+                    "head": "person",
+                    "tail": "bad-sentiment",
+                },
+            ],
+        }
+    )
+
+    result = extract_document("text", config, lambda *_: response)
+
+    assert [entity["entity_id"] for entity in result["entities"]] == ["person"]
+    assert result["relations"] == []
 
 
 def test_malformed_response_raises() -> None:

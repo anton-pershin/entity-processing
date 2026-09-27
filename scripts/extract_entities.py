@@ -16,11 +16,16 @@ logger = logging.getLogger(__name__)
 CONFIG_NAME = "config_extract_entities"
 
 
+def _request_based_on_message_history(**kwargs: Any) -> Any:
+    """Load rally only when an actual LLM request is made."""
+    from rally.interaction import request_based_on_message_history
+
+    return request_based_on_message_history(**kwargs)
+
+
 def _request_factory(
     llm: Any, retries: int = 3, backoff_seconds: float = 1.0
 ) -> Callable[[str, str], str]:
-    from rally.interaction import request_based_on_message_history
-
     if retries < 0:
         raise ValueError("retries must be non-negative")
     if backoff_seconds < 0:
@@ -34,7 +39,7 @@ def _request_factory(
         last_error: Exception | None = None
         for attempt in range(retries + 1):
             try:
-                response = request_based_on_message_history(
+                response = _request_based_on_message_history(
                     llm_server_url=llm.url,
                     message_history=messages,
                     authorization=llm.authorization,
@@ -86,6 +91,7 @@ def run(cfg: DictConfig) -> None:
         relation_types=_config_tuple(cfg.relation_types),
         sentiment_types=_config_tuple(cfg.sentiment_types),
         system_prompt=str(cfg.system_prompt),
+        user_prompt_template=str(cfg.user_prompt_template),
     )
     llm = instantiate(cfg.llm)
     request = _request_factory(

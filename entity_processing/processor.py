@@ -20,22 +20,17 @@ class ExtractionConfig:
     relation_types: tuple[str, ...]
     sentiment_types: tuple[str, ...]
     system_prompt: str
+    user_prompt_template: str
 
 
 def build_user_prompt(text: str, config: ExtractionConfig) -> str:
     """Build the single prompt sent for one document."""
-    return (
-        f"{config.system_prompt}\n\n"
-        "Extract entities, targeted sentiment, and local relations from the document.\n"
-        "Return only a JSON object with this shape: "
-        '{"entities": [{"entity_id": "e1", "mention": "...", '
-        '"type": "...", "sentiment": "..."}], '
-        '"relations": [{"relation_type": "...", "head": "e1", '
-        '"tail": "e2"}]}\n'
-        f"Allowed entity types: {list(config.entity_types)}\n"
-        f"Allowed relation types: {list(config.relation_types)}\n"
-        f"Allowed sentiment types: {list(config.sentiment_types)}\n\n"
-        f"Document:\n{text}"
+    return config.user_prompt_template.format(
+        system_prompt=config.system_prompt,
+        document=text,
+        entity_types=list(config.entity_types),
+        relation_types=list(config.relation_types),
+        sentiment_types=list(config.sentiment_types),
     )
 
 
