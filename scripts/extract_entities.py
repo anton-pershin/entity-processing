@@ -73,7 +73,19 @@ def _request_factory(
 
 
 def _config_tuple(value: Any) -> tuple[str, ...]:
+    if isinstance(value, (str, bytes)):
+        raise ValueError("label configuration must be a list, not a scalar")
     return tuple(str(item) for item in value)
+
+
+def _validate_llm_credential(llm: Any) -> None:
+    """Reject the placeholder authorization produced without an API key."""
+    api_key = getattr(llm, "api_key", None)
+    authorization = getattr(llm, "authorization", None)
+    if api_key or authorization not in (None, "", "Bearer None", "Bearer null"):
+        return
+    logger.error("LLM credential is missing; refusing to process documents")
+    raise ValueError("LLM credential is missing")
 
 
 def run(cfg: DictConfig) -> None:
@@ -94,6 +106,7 @@ def run(cfg: DictConfig) -> None:
         user_prompt_template=str(cfg.user_prompt_template),
     )
     llm = instantiate(cfg.llm)
+    _validate_llm_credential(llm)
     request = _request_factory(
         llm,
         retries=int(getattr(cfg, "retries", 3)),

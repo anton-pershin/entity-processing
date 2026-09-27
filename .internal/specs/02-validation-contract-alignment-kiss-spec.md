@@ -74,6 +74,12 @@ This includes ensuring that:
 
 B7. The exact Hydra configuration inspection command exits successfully without credentials or input data.
 
+R8. Credential configuration failure
+
+Before processing any input documents, the solution must reject a missing LLM credential with a clear logged error and a nonzero failure. It must not invoke the LLM, write per-document empty fallback records, or report a successful run when the configured credential is absent.
+
+B8. A run with an absent credential fails before opening the input/output processing loop; document-level empty fallback records remain reserved for failures that occur after a credentialed request begins.
+
 ### 2. Tests
 
 All tests use deterministic LLM doubles and temporary files. No test makes a real LLM or network request.
@@ -203,6 +209,12 @@ Assert that no dependency resolves to an unrelated package and that configuratio
 
 Covers R7.
 
+T11. Missing-credential fail-fast
+
+Run `run(cfg)` with a deterministic fake LLM whose credential and authorization are absent or placeholder values. Assert that it raises a clear credential error before opening the input/output processing loop and that the request double is never called.
+
+Covers R8/B8.
+
 ### 3. Implementation plan
 
 #### 3.1 Implementation repos
@@ -272,7 +284,13 @@ The implementation uses the `entity-processing` repository only.
 
    The check must run without credentials, input data, or output data.
 
-8. Clean-environment verification
+8. Credential validation
+
+Validate the instantiated LLM credential before opening the input/output files or creating the request-processing loop. A missing or placeholder credential must log a clear error and raise a nonzero failure, preventing misleading empty fallback records from an entirely unauthenticated run.
+
+Keep per-document empty fallback handling for failures that occur after a credentialed request begins.
+
+9. Clean-environment verification
 
    Before considering the implementation complete, create a temporary clean environment or clone and verify:
 
@@ -293,8 +311,9 @@ The implementation uses the `entity-processing` repository only.
 8. [ ] Add or update configuration-inspection and dependency/import-path verification.
 9. [ ] Run the focused test suite and fix implementation or test issues.
 10. [ ] Run the complete available test suite and verify the exact validation-service invocation shape locally with a mocked LLM.
-11. [ ] Reproduce the clean-environment installation and configuration-inspection checks.
-12. [ ] Review generated JSONL against the current constitution contract and remove temporary test artifacts.
+9. [ ] Validate missing credentials before opening processing files and add the T11 fail-fast test.
+10. [ ] Reproduce the clean-environment installation and configuration-inspection checks.
+11. [ ] Review generated JSONL against the current constitution contract and remove temporary test artifacts.
 
 #### 3.4 Modification summary
 

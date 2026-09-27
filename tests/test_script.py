@@ -117,6 +117,27 @@ def test_configuration_inspection_subprocess() -> None:
     assert "- OTHER" not in result.stdout
 
 
+def test_missing_llm_credential_fails_before_opening_files(
+    monkeypatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    input_path = tmp_path / "missing-input.jsonl"
+    output_path = tmp_path / "missing-output.jsonl"
+
+    class MissingCredentialLlm:
+        authorization = "Bearer None"
+
+    monkeypatch.setattr(
+        extract_script, "instantiate", lambda _config: MissingCredentialLlm()
+    )
+
+    with pytest.raises(ValueError, match="LLM credential is missing"):
+        extract_script.run(_config(input_path, output_path))
+
+    assert not input_path.exists()
+    assert not output_path.exists()
+    assert "LLM credential is missing" in caplog.text
+
+
 def test_rally_invalid_response_is_logged(
     monkeypatch, caplog: pytest.LogCaptureFixture
 ) -> None:
