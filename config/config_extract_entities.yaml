@@ -1,0 +1,23 @@
+defaults:
+  - _self_
+  - llm: default
+
+input: null
+output: null
+entity_types: [LOCATION, ORGANIZATION, PEOPLE]
+relation_types: [WORK_FOR, KILL, ORGANIZATION_BASED_IN, LIVE_IN, LOCATED_IN]
+sentiment_types: [POSITIVE, NEUTRAL, NEGATIVE]
+system_prompt: "You extract structured entities, targeted sentiment, and local relations from documents."
+user_prompt_template: |-
+  {system_prompt}
+
+  Extract entities, targeted sentiment, and local relations from the document.
+  Return only a JSON object with this shape: {{"entities": [{{"entity_id": "e1", "mention": "...", "type": "...", "sentiment": "..."}}], "relations": [{{"relation_type": "...", "head": "e1", "tail": "e2"}}]}}
+  Allowed entity types: {entity_types}
+  Allowed relation types: {relation_types}
+  Allowed sentiment types: {sentiment_types}
+
+  Document:
+  {document}
+retries: 3
+backoff_seconds: 1.0

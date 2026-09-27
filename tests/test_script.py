@@ -1,0 +1,447 @@
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+from hydra import compose, initialize_config_dir
+from omegaconf import OmegaConf
+
+import scripts.extract_entities as extract_script
+
+
+class FakeLlm:
+    url = "http://test-llm/v1/chat/completions"
+    authorization = "Bearer test"
+    model = "test-model"
+    max_output_tokens = 2048
+    enable_thinking = False
+
+
+def _run_with_stub(monkeypatch, responses: list[object], cfg):
+    calls = []
+    response_iter = iter(responses)
+
+    def request_based_on_message_history(**kwargs):
+        calls.append(kwargs)
+        response = next(response_iter)
+        if isinstance(response, Exception):
+            raise response
+        return {"content": response}
+
+    monkeypatch.setattr(
+        extract_script,
+        "_request_based_on_message_history",
+        request_based_on_message_history,
+    )
+    monkeypatch.setattr(extract_script, "instantiate", lambda _config: FakeLlm())
+    extract_script.run(cfg)
+    return calls
+
+
+def _config(input_path: Path, output_path: Path, **overrides):
+    values = {
+        "input": str(input_path),
+        "output": str(output_path),
+        "entity_types": ["PEOPLE", "ORGANIZATION"],
+        "relation_types": ["WORK_FOR"],
+        "sentiment_types": ["POSITIVE", "NEUTRAL"],
+        "system_prompt": "Test system prompt",
+        "user_prompt_template": (
+            "{system_prompt}\\n\\n"
+            "Extract entities, targeted sentiment, and local relations from the document.\\n"
+            "Return only a JSON object with this shape: "
+            '{{"entities": [{{"entity_id": "e1", "mention": "...", '
+            '"type": "...", "sentiment": "..."}}], '
+            '"relations": [{{"relation_type": "...", "head": "e1", '
+            '"tail": "e2"}}]}}\\n'
+            "Allowed entity types: {entity_types}\\n"
+            "Allowed relation types: {relation_types}\\n"
+            "Allowed sentiment types: {sentiment_types}\\n\\n"
+            "Document:\\n{document}"
+        ),
+        "retries": 0,
+        "backoff_seconds": 0,
+        "llm": {},
+    }
+    values.update(overrides)
+    return OmegaConf.create(values)
+
+
+def _write_input(path: Path, documents: list[dict]) -> None:
+    path.write_text(
+        "".join(
+            json.dumps(document, ensure_ascii=False) + "\n" for document in documents
+        ),
+        encoding="utf-8",
+    )
+
+
+def _read_output(path: Path) -> list[dict]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def _empty_response() -> str:
+    return json.dumps({"entities": [], "relations": []})
+
+
+def test_default_config_uses_current_master_labels() -> None:
+    with initialize_config_dir(
+        config_dir=str(Path(__file__).parents[1] / "config"), version_base="1.3"
+    ):
+        cfg = compose(config_name="config_extract_entities")
+
+    assert list(cfg.entity_types) == ["LOCATION", "ORGANIZATION", "PEOPLE"]
+    assert "OTHER" not in cfg.entity_types
+    assert list(cfg.relation_types) == [
+        "WORK_FOR",
+        "KILL",
+        "ORGANIZATION_BASED_IN",
+        "LIVE_IN",
+        "LOCATED_IN",
+    ]
+    assert list(cfg.sentiment_types) == ["POSITIVE", "NEUTRAL", "NEGATIVE"]
+
+
+def test_configuration_inspection_subprocess() -> None:
+    result = subprocess.run(
+        [sys.executable, "scripts/extract_entities.py", "--cfg", "job"],
+        cwd=Path(__file__).parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "model: glm-5.3-flash" in result.stdout
+    assert "- OTHER" not in result.stdout
+
+
+def test_missing_llm_credential_fails_before_opening_files(
+    monkeypatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    input_path = tmp_path / "missing-input.jsonl"
+    output_path = tmp_path / "missing-output.jsonl"
+
+    class MissingCredentialLlm:
+        authorization = "Bearer None"
+
+    monkeypatch.setattr(
+        extract_script, "instantiate", lambda _config: MissingCredentialLlm()
+    )
+
+    with pytest.raises(ValueError, match="LLM credential is missing"):
+        extract_script.run(_config(input_path, output_path))
+
+    assert not input_path.exists()
+    assert not output_path.exists()
+    assert "LLM credential is missing" in caplog.text
+
+
+def test_rally_invalid_response_is_logged(
+    monkeypatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    invalid_response = {"unexpected": "response", "content": None}
+
+    def request_based_on_message_history(**_kwargs):
+        return invalid_response
+
+    monkeypatch.setattr(
+        extract_script,
+        "_request_based_on_message_history",
+        request_based_on_message_history,
+    )
+
+    request = extract_script._request_factory(FakeLlm(), retries=0)
+    with pytest.raises(ValueError, match="without text content"):
+        request("system", "user")
+
+    assert repr(invalid_response) in caplog.text
+
+
+def test_request_retries_with_exponential_backoff(monkeypatch) -> None:
+    responses = [
+        ValueError("first"),
+        ValueError("second"),
+        ValueError("third"),
+        {"content": "{}"},
+    ]
+    calls = []
+
+    def request_based_on_message_history(**_kwargs):
+        calls.append(True)
+        response = responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    sleeps = []
+    monkeypatch.setattr(
+        extract_script,
+        "_request_based_on_message_history",
+        request_based_on_message_history,
+    )
+    monkeypatch.setattr(extract_script.time, "sleep", sleeps.append)
+
+    request = extract_script._request_factory(
+        FakeLlm(), retries=3, backoff_seconds=0.25
+    )
+    assert request("system", "user") == "{}"
+    assert len(calls) == 4
+    assert sleeps == [0.25, 0.5, 1.0]
+
+
+def test_request_retries_are_configurable(monkeypatch) -> None:
+    calls = []
+
+    def request_based_on_message_history(**_kwargs):
+        calls.append(True)
+        raise ValueError("failure")
+
+    monkeypatch.setattr(
+        extract_script,
+        "_request_based_on_message_history",
+        request_based_on_message_history,
+    )
+    monkeypatch.setattr(extract_script.time, "sleep", lambda _delay: None)
+
+    request = extract_script._request_factory(FakeLlm(), retries=2, backoff_seconds=0)
+    with pytest.raises(ValueError, match="failure"):
+        request("system", "user")
+    assert len(calls) == 3
+
+
+def test_script_smoke_preserves_order_ids_and_contract(
+    monkeypatch, tmp_path: Path
+) -> None:
+    input_path = tmp_path / "input.jsonl"
+    output_path = tmp_path / "output.jsonl"
+    documents = [
+        {"doc_id": "first", "text": "Первый документ"},
+        {"doc_id": "second", "text": "Second document"},
+    ]
+    _write_input(input_path, documents)
+
+    calls = _run_with_stub(
+        monkeypatch,
+        responses=[_empty_response(), _empty_response()],
+        cfg=_config(input_path, output_path),
+    )
+
+    output = _read_output(output_path)
+    assert [record["doc_id"] for record in output] == ["first", "second"]
+    assert all(set(record) == {"doc_id", "entities", "relations"} for record in output)
+    assert [call["model"] for call in calls] == ["test-model", "test-model"]
+    assert [call["max_output_tokens"] for call in calls] == [2048, 2048]
+    assert "Первый документ" in calls[0]["message_history"][1]["content"]
+    assert "PEOPLE" in calls[0]["message_history"][1]["content"]
+
+
+def test_repeated_invocations_use_independent_label_subsets(
+    monkeypatch, tmp_path: Path
+) -> None:
+    first_input = tmp_path / "first.jsonl"
+    first_output = tmp_path / "first-output.jsonl"
+    second_input = tmp_path / "second.jsonl"
+    second_output = tmp_path / "second-output.jsonl"
+    _write_input(first_input, [{"doc_id": "first", "text": "First"}])
+    _write_input(second_input, [{"doc_id": "second", "text": "Second"}])
+
+    response = json.dumps(
+        {
+            "entities": [
+                {
+                    "entity_id": "e1",
+                    "mention": "Alice",
+                    "type": "PEOPLE",
+                    "sentiment": "NEUTRAL",
+                }
+            ],
+            "relations": [],
+        }
+    )
+
+    _run_with_stub(
+        monkeypatch,
+        responses=[response],
+        cfg=_config(
+            first_input,
+            first_output,
+            entity_types=["PEOPLE"],
+            sentiment_types=["NEUTRAL"],
+        ),
+    )
+    _run_with_stub(
+        monkeypatch,
+        responses=[response],
+        cfg=_config(
+            second_input,
+            second_output,
+            entity_types=["ORGANIZATION"],
+            sentiment_types=["POSITIVE"],
+        ),
+    )
+
+    first = _read_output(first_output)
+    second = _read_output(second_output)
+    assert first[0]["entities"][0]["type"] == "PEOPLE"
+    assert second[0]["entities"] == []
+    assert [record["doc_id"] for record in first] == ["first"]
+    assert [record["doc_id"] for record in second] == ["second"]
+
+
+def test_script_failure_isolation_logs_and_continues(
+    monkeypatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    input_path = tmp_path / "input.jsonl"
+    output_path = tmp_path / "output.jsonl"
+    _write_input(
+        input_path,
+        [
+            {"doc_id": "failed", "text": "bad"},
+            {"doc_id": "later", "text": "good"},
+        ],
+    )
+
+    _run_with_stub(
+        monkeypatch,
+        responses=[ValueError("stub failure"), _empty_response()],
+        cfg=_config(input_path, output_path),
+    )
+
+    output = _read_output(output_path)
+    assert output[0] == {"doc_id": "failed", "entities": [], "relations": []}
+    assert output[1]["doc_id"] == "later"
+    assert "failed" in caplog.text
+    assert "stub failure" in caplog.text
+
+
+def test_hydra_validation_overrides_and_model_boundary(
+    monkeypatch, tmp_path: Path
+) -> None:
+    input_path = tmp_path / "input.jsonl"
+    output_path = tmp_path / "output.jsonl"
+    _write_input(input_path, [{"doc_id": "one", "text": "text"}])
+
+    with initialize_config_dir(
+        config_dir=str(Path(__file__).parents[1] / "config"), version_base="1.3"
+    ):
+        cfg = compose(
+            config_name="config_extract_entities",
+            overrides=[
+                f"input={input_path}",
+                f"output={output_path}",
+                "entity_types=[CUSTOM]",
+                "relation_types=[RELATES]",
+                "sentiment_types=[MIXED]",
+                "llm.model=override-model",
+            ],
+        )
+
+    calls = _run_with_stub(monkeypatch, responses=[_empty_response()], cfg=cfg)
+    prompt = calls[0]["message_history"][1]["content"]
+    assert calls[0]["model"] == "test-model"
+    assert "CUSTOM" in prompt
+    assert "RELATES" in prompt
+    assert "MIXED" in prompt
+
+
+def test_malformed_input_lines_are_skipped_and_later_documents_continue(
+    monkeypatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    input_path = tmp_path / "input.jsonl"
+    output_path = tmp_path / "output.jsonl"
+    input_path.write_text(
+        json.dumps({"doc_id": "first", "text": "first"})
+        + "\nnot-json\n\n"
+        + json.dumps({"doc_id": "last", "text": "last"})
+        + "\n",
+        encoding="utf-8",
+    )
+
+    _run_with_stub(
+        monkeypatch,
+        responses=[_empty_response(), _empty_response()],
+        cfg=_config(input_path, output_path),
+    )
+
+    output = _read_output(output_path)
+    assert [record["doc_id"] for record in output] == ["first", "last"]
+    assert "input line 2" in caplog.text
+    assert "input line 3" in caplog.text
+
+
+def test_validation_contract_asserts_ids_and_relation_endpoints(
+    monkeypatch, tmp_path: Path
+) -> None:
+    input_path = tmp_path / "input.jsonl"
+    output_path = tmp_path / "output.jsonl"
+    documents = [
+        {"doc_id": "first", "text": "First document"},
+        {"doc_id": "second", "text": "Second document"},
+    ]
+    _write_input(input_path, documents)
+    response = json.dumps(
+        {
+            "entities": [
+                {
+                    "entity_id": "e1",
+                    "mention": "Alice",
+                    "type": "PEOPLE",
+                    "sentiment": "NEUTRAL",
+                },
+                {
+                    "entity_id": "e2",
+                    "mention": "Acme",
+                    "type": "ORGANIZATION",
+                    "sentiment": "POSITIVE",
+                },
+            ],
+            "relations": [{"relation_type": "WORK_FOR", "head": "e1", "tail": "e2"}],
+        }
+    )
+
+    _run_with_stub(
+        monkeypatch,
+        responses=[response, response],
+        cfg=_config(input_path, output_path),
+    )
+
+    output = _read_output(output_path)
+    assert {record["doc_id"] for record in output} == {
+        document["doc_id"] for document in documents
+    }
+    for record in output:
+        entity_ids = [entity["entity_id"] for entity in record["entities"]]
+        assert len(entity_ids) == len(set(entity_ids))
+        entity_id_set = set(entity_ids)
+        for relation in record["relations"]:
+            assert relation["head"] in entity_id_set
+            assert relation["tail"] in entity_id_set
+
+
+def test_exact_validation_overrides_compose_and_run(
+    monkeypatch, tmp_path: Path
+) -> None:
+    input_path = tmp_path / "input.jsonl"
+    output_path = tmp_path / "output.jsonl"
+    _write_input(input_path, [{"doc_id": "one", "text": "text"}])
+
+    with initialize_config_dir(
+        config_dir=str(Path(__file__).parents[1] / "config"), version_base="1.3"
+    ):
+        cfg = compose(
+            config_name="config_extract_entities",
+            overrides=[
+                f"input={input_path}",
+                f"output={output_path}",
+                "entity_types=[LOCATION,ORGANIZATION,PEOPLE]",
+                "relation_types=[WORK_FOR,KILL,ORGANIZATION_BASED_IN,LIVE_IN,LOCATED_IN]",
+                "sentiment_types=[POSITIVE,NEUTRAL,NEGATIVE]",
+            ],
+        )
+
+    _run_with_stub(monkeypatch, responses=[_empty_response()], cfg=cfg)
+    assert _read_output(output_path)[0]["doc_id"] == "one"
+    assert cfg.retries == 3
+    assert cfg.backoff_seconds == 1.0
