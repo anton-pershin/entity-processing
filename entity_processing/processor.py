@@ -64,14 +64,30 @@ def normalize_result(
         mention = _as_string(candidate.get("mention"))
         entity_type = _as_string(candidate.get("type"))
         sentiment = _as_string(candidate.get("sentiment"))
+
+        # Basic assumptions about entity structure
+        # must-have for any dataset
         if (
             entity_id is None
             or mention is None
-            or entity_type not in config.entity_types
-            or sentiment not in config.sentiment_types
             or entity_id in retained_ids
         ):
             continue
+
+        # Entity type structure for datasets supporting them
+        if (
+            config.entity_types
+            and entity_type not in config.entity_types
+        ):
+            continue
+
+        # Sentiment structure for datasets supporting them
+        if (
+            config.sentiment_types
+            and sentiment not in config.sentiment_types
+        ):
+            continue
+
         retained_ids.add(entity_id)
         entities.append(
             {
