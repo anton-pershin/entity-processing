@@ -73,8 +73,6 @@ def _request_factory(
 
 
 def _config_tuple(value: Any) -> tuple[str, ...]:
-    if isinstance(value, (str, bytes)):
-        raise ValueError("label configuration must be a list, not a scalar")
     return tuple(str(item) for item in value)
 
 

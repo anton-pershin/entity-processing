@@ -311,9 +311,9 @@ Keep per-document empty fallback handling for failures that occur after a creden
 8. [ ] Add or update configuration-inspection and dependency/import-path verification.
 9. [ ] Run the focused test suite and fix implementation or test issues.
 10. [ ] Run the complete available test suite and verify the exact validation-service invocation shape locally with a mocked LLM.
-9. [ ] Validate missing credentials before opening processing files and add the T11 fail-fast test.
-10. [ ] Reproduce the clean-environment installation and configuration-inspection checks.
-11. [ ] Review generated JSONL against the current constitution contract and remove temporary test artifacts.
+10. [ ] Validate missing credentials before opening processing files and add the T11 fail-fast test.
+11. [ ] Reproduce the clean-environment installation and configuration-inspection checks.
+12. [ ] Review generated JSONL against the current constitution contract and remove temporary test artifacts.
 
 #### 3.4 Modification summary
 
