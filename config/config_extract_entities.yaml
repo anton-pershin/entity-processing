@@ -13,8 +13,9 @@ user_prompt_template: |-
 
   Extract entities, targeted sentiment, and local relations from the document.
   Return only a JSON object with this shape: {{"entities": [{{"entity_id": "e1", "mention": "...", "type": "...", "sentiment": "..."}}], "relations": [{{"relation_type": "...", "head": "e1", "tail": "e2"}}]}}
-  Entity mentions must be exact contiguous substrings copied from the document, preserving source casing, abbreviations, and punctuation; do not normalize or paraphrase them. Do not add surrounding descriptive words or generic nouns to a named entity (for example, prefer "AP" over "AP LaserPhoto network" when AP is the named organization).
-  Extract all relations that are explicitly supported by the document. Use the relation label whose meaning best matches the stated fact and preserve its direction. Do not omit a relation merely because it requires ordinary sentence-level reasoning, but do not invent relations from unrelated co-occurrence or world knowledge.
+  Entity mentions must be the minimal named span copied from the document, preserving source casing and internal punctuation. Omit sentence-final punctuation (such as a trailing period or comma) unless it is part of the name; do not add surrounding descriptive words or generic nouns to a named entity (for example, prefer "AP" over "AP LaserPhoto network", and "John Stembridge" over "John Stembridge.").
+  Extract all relations explicitly supported by the document, including relations expressed by ordinary wording such as "was born [place]", "reared in [place]", "native [place]", "works for [organization]", "located in [place]", and "assassin [person] ... killed [person]". Use the relation label whose meaning best matches the stated fact and preserve its direction. Do not invent relations from unrelated co-occurrence or world knowledge.
+  For location relations, include each clearly stated location assignment, even when several entities share the same location. For example, "X was born Duluth and reared in Hibbing" produces LIVE_IN(X, Duluth) and LIVE_IN(X, Hibbing).
   Use only the allowed labels below.
   Allowed entity types: {entity_types}
   Allowed relation types: {relation_types}
