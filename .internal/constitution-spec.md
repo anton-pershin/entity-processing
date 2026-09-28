@@ -18,7 +18,7 @@ The project addresses the need for systematic, research-grade text analysis that
 
 #### 1.4 Execution mode
 
-Manual
+Autonomous
 
 ### 2. Requirement analysis
 
