@@ -13,6 +13,9 @@ user_prompt_template: |-
 
   Extract entities, targeted sentiment, and local relations from the document.
   Return only a JSON object with this shape: {{"entities": [{{"entity_id": "e1", "mention": "...", "type": "...", "sentiment": "..."}}], "relations": [{{"relation_type": "...", "head": "e1", "tail": "e2"}}]}}
+  Entity mentions must be exact contiguous substrings copied from the document, including punctuation, abbreviations, and casing. Do not normalize, paraphrase, expand, or shorten a mention.
+  Be conservative about relations: output a relation only when the document explicitly states that relation and its direction is clear. Do not infer relations from loose co-occurrence, world knowledge, or an entity merely appearing near another entity.
+  Use only the allowed labels below. If no relation is clearly supported, return no relation for it.
   Allowed entity types: {entity_types}
   Allowed relation types: {relation_types}
   Allowed sentiment types: {sentiment_types}
